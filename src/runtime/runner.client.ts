@@ -26,7 +26,7 @@ export class AgentSdkRunnerClient implements RunnerClient {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const options: Record<string, any> = {
-      maxTurns: 10,
+      maxTurns: 30,
       permissionMode: 'bypassPermissions',
       timeout: timeoutMs,
     };

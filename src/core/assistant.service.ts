@@ -225,10 +225,14 @@ export class AssistantService {
     const postcheck = safetyPostcheck(runnerResponse);
     if (!postcheck.allow) {
       console.warn(`[robin] safety.postcheck blocked requestId=${requestId} reason=${postcheck.reason}`);
+      // Empty response usually means the agent hit maxTurns mid-investigation
+      const fallback = postcheck.reason === 'empty response'
+        ? '_Investigation ran out of turns before producing a summary. Try: "summarize what you found" to continue._'
+        : '_Response blocked by safety check. Please try a different request._';
       return {
         requestId,
         conversationId,
-        text: '_Response blocked by safety check. Please try a different request._',
+        text: fallback,
         isDraft: false,
         toolTrace: runnerResponse.toolTrace,
       };
