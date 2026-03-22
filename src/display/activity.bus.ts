@@ -24,6 +24,7 @@ export interface ActivityEvent {
   model?: string;        // e.g. 'kimi-k2p5' or 'claude-sonnet-4-6'
   provider?: string;     // 'fireworks' | 'claude'
   displayName?: string;  // e.g. 'kimi-k2p5 · fireworks'
+  threadId?: string;     // Slack thread ts — for posting ack to the right thread
 }
 
 type Handler = (event: ActivityEvent) => void;

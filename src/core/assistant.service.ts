@@ -162,9 +162,13 @@ export class AssistantService {
       };
     }
 
-    // 4. Notify display layer (model label + spinner) then run
+    // 4. Notify display layer (model label + spinner) then run.
+    // source/channel/threadId let startSlack() post an immediate "Checking…" ack.
     activityBus.emit({
       kind: 'runner_start',
+      source: event.source,
+      channel: event.channelId,
+      threadId: event.threadId,
       model: modelSelection.model,
       provider: modelSelection.provider,
       displayName: modelSelection.displayName,

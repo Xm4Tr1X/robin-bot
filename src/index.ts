@@ -124,6 +124,17 @@ async function startSlack(
     ownerUserId: config.settings.ownerUserId,
   });
 
+  // Post an immediate "Checking…" to the Slack thread when the LLM starts,
+  // so the owner knows Robin is alive and working on long requests.
+  const { activityBus } = await import('./display/activity.bus');
+  activityBus.subscribe(async (event) => {
+    if (event.kind === 'runner_start' && event.source === 'slack' && event.channel) {
+      try {
+        await adapter.reply('_Checking…_', event.threadId, event.channel);
+      } catch { /* non-fatal — don't let ack failure block the investigation */ }
+    }
+  });
+
   await adapter.start(async (event) => {
     await eventRouter.route(event, async (text) => {
       await adapter.reply(text, event.threadId, event.channelId!);
