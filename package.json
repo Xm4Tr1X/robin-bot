@@ -14,7 +14,8 @@
     "test:unit": "vitest run tests/unit",
     "test:sandbox": "vitest run tests/unit/sandbox",
     "test:coverage": "vitest run --coverage",
-    "web": "open http://localhost:3000"
+    "web": "open http://localhost:3000",
+    "push": "sh push.sh"
   },
   "engines": {
     "node": ">=20.6.0"
