@@ -1,6 +1,6 @@
 # Robin Bot Repo Skill
 
-Personal AI assistant bot (TypeScript/Node 24) — Phases A–I complete, Phases J–K–L in progress.
+Personal AI assistant (TypeScript/Node 24) — 561 tests, production-ready.
 
 ## Load Policy
 
@@ -13,14 +13,19 @@ on-mention:
   - memory: modules/technical/patterns.md
   - ledger: modules/technical/patterns.md
   - safety: modules/technical/patterns.md
-  - staging: plans/phases-jkl.md
-  - phase-j: plans/phases-jkl.md
-  - phase-k: plans/phases-jkl.md
-  - phase-l: plans/phases-jkl.md
+  - staging: modules/technical/patterns.md
+  - routing: modules/technical/patterns.md
+  - fireworks: modules/technical/patterns.md
+  - kimi: modules/technical/patterns.md
+  - thread: modules/technical/patterns.md
+  - mcp: modules/technical/patterns.md
 
 on-file-change:
-  - src/shadow/: plans/phases-jkl.md
+  - src/shadow/: modules/technical/patterns.md
   - src/memory/: modules/technical/patterns.md
   - src/policy/: modules/technical/patterns.md
-  - src/features/staging/: plans/phases-jkl.md
+  - src/features/staging/: modules/technical/patterns.md
+  - src/runtime/: modules/technical/patterns.md
+  - src/display/: modules/technical/patterns.md
   - src/contracts.ts: core/boundaries.md
+  - src/ingress/: modules/technical/patterns.md

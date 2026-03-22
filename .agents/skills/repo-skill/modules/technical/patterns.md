@@ -1,91 +1,128 @@
 # Robin Bot — Technical Patterns
 
-## Store: ledgerHolder Pattern (Critical)
+## Multi-Model Routing Architecture
 
-`src/todo.ts` exports `ledgerHolder: { instance: TodoLedger }` — NOT a singleton.
-`initTodoLedger(store)` is called in bootstrap and seeds todos from SQLite.
-All callers (`robin.ts`, `session.ts`, `command.router.ts`) use `ledgerHolder.instance.*`.
+Two `RunnerClient` implementations behind a shared interface:
 
-Why: allows test code to swap the instance without module re-import.
+```ts
+interface RunnerClient {
+  run(request: RunnerRequest): Promise<RunnerResponse>;
+}
+```
+
+- `AgentSdkRunnerClient` — Claude models via `@anthropic-ai/claude-agent-sdk`. Supports MCP servers, subagents, tool use. Used when thread/task context signals MCP need.
+- `FireworksRunnerClient` — OpenAI-compatible HTTP call to Fireworks AI. No tools, no MCP. Fast (~1-5s). Used for todo updates, quick Q&A, analytical tasks.
+
+`model.selector.ts` takes `(taskClass, riskLevel, text, contextText?)` and returns `{ provider, model, displayName }`. `contextText` includes thread messages — "check this" in a Coralogix thread routes to Sonnet even though the text has no keywords.
+
+`runner.factory.ts` returns the appropriate client. When `modelRouting.enabled = false`, the injected `runnerClient` is used directly (preserves test behaviour).
+
+## Thread Context Injection
+
+On `app_mention` in a Slack thread:
+1. Adapter calls `fetchThreadContext(client, channelId, threadTs, { includeBots: true })` — **bot messages included** because alerts come from bots
+2. Result stored in `event.metadata.threadMessages`
+3. `assistant.service.ts` passes thread messages to `selectModel()` (routing signal) and `buildPromptEnvelope()` (LLM context)
+4. `envelopeToPromptString()` includes `[thread context]` block before the User: line
+
+Thread continuation (no @mention needed after Robin has replied):
+- `message` handler checks `getSession(chId, thId).agentSessionId`
+- If set: Robin has been in this thread → pass message through without @mention
+
+## ledgerHolder Pattern (Critical)
+
+`src/todo.ts` exports `ledgerHolder: { instance: TodoLedger }` — NOT a singleton export.
+`initTodoLedger(store)` seeds from SQLite on startup.
+All callers use `ledgerHolder.instance.*`.
 
 ```ts
 // Correct
 import { ledgerHolder } from '../todo'
 ledgerHolder.instance.add(...)
-
-// Wrong — stale reference
+// Wrong — stale reference if module is reloaded
 import { ledger } from '../todo'
 ```
 
-## Memory: Conversation-Scoped (Current) vs Global (Phase K)
+## Todo Natural Language Execution (CLI)
 
-Currently `MemoryService.getForConversation(conversationId)` — all memory is per-thread.
-Phase K adds global scope: `scope: 'conversation' | 'global'` on `MemoryEntry`, `conversationId` becomes optional.
-`buildPromptEnvelope` must pull global memory in addition to conversation-local memory.
+After LLM responds on `cli` or `system` source:
+1. `extractTodoCommands(responseText)` — finds `add todo:`, `mark done:`, etc. in code blocks, inline backticks, plain lines
+2. `executeTodoCommands(commands)` — runs against `ledgerHolder.instance`
+3. Result appended to reply: `_Done — executed automatically: ..._`
 
-## Safety Gate Failure Modes
+No copy-paste required on CLI.
+
+## Global vs Conversation Memory
+
+- Conversation-scoped: `getForConversation(conversationId)` — per thread, 30-day retention
+- Global-scoped: `getGlobal()` — owner preferences and behavioral patterns, no conversationId
+- Global patterns injected as `[owner context] [preference/behavioral_pattern] ...` before conversation-local memory in every prompt
+
+Nightly synthesis (`SynthesisScheduler`):
+1. Fetches recent activity from `ActivityService`
+2. Calls `PatternSynthesizer` (uses `SandboxLlmClient` directly, no tools)
+3. Deduplicates against existing global patterns
+4. Writes new preferences/patterns to `MemoryService.addGlobal()`
+
+## Safety Gate Ordering
 
 Pre-LLM (`safetyPrecheck`):
-- Blocks if userInput or memoryContext contains secrets (token/key patterns via `containsSecrets()`)
-- Blocks if input > 10000 chars
-- Currently WARNS (does not block) on forbidden tools in allowedTools — Phase L fixes this to block
+1. Secrets in userInput → deny
+2. Secrets in memoryContext → deny
+3. Forbidden tools in allowedTools (`Write`, `Edit`, `NotebookEdit`, `Bash`) → **hard block** (not warn)
+4. Input > 10000 chars → deny
 
-Post-LLM (`safetyPostcheck`):
-- Runs redaction on response text before publish
-- Blocks if redaction finds unredacted secrets in output
+Post-LLM (`safetyPostcheck` + `personaGuard`):
+- Redacts secrets from response text
+- Blocks reasoning leaks and identity violations
+- Failure blocks publish, emits safe fallback
 
-Forbidden tools currently: `Write`, `Edit`, `NotebookEdit`, `Bash` — warn-only.
-Phase L changes forbidden tool detection to hard block.
+## Prompt Envelope → Prompt String
 
-## Event Router: taskOnly Flag
+`envelopeToPromptString()` builds:
+```
+[Mode: reply]
+[Policy: none]
+[Memory:
+  [owner context] [preference] prefers bullet points
+  [decision] use TypeScript everywhere]
+[Active tools: Read, Glob, Grep]
+[current todos]
+  • [`abc12345`] *task name* — high | todo
+[thread context — messages above in this Slack thread]
+  [1] CRITICAL alert from Coralogix...
 
-`EventRouterConfig.taskOnly = true` makes the router reject free-form messages that don't match deterministic commands. Used for Slack ingress where Robin should only handle task commands, not freeform chat.
+User: check this
+```
 
-Phase J adds a second early-exit: `event.source === 'slack_shadow'` skips everything and writes to ActivityService silently.
+Extra channelContext items (todos, thread) are appended after `[Active tools]` and before `User:`.
 
-## Session Mode vs Assistant Mode (Two Separate Axes)
-
-These are often confused:
+## Session Mode (Two Axes)
 
 | Axis | Values | Controls |
 |---|---|---|
-| `session.mode` (response mode) | `observe`, `reply`, `draft` | Whether/how to publish the reply |
-| `session.assistantMode` | `orchestrated`, `claude-direct` | How the prompt envelope is built |
+| `session.mode` | `reply` (default), `draft`, `observe` | Whether/how to publish reply |
+| `session.assistantMode` | `orchestrated` (default), `claude-direct` | How prompt envelope is built |
 
-`observe` mode: LLM still runs (in current code), reply is suppressed.
-`draft` mode: reply is wrapped in a draft block — does NOT hold back tool execution.
+Default mode is now `reply` (not `observe`) — changed so Slack and CLI both respond by default.
 
-## SQLite Store: node:sqlite Not better-sqlite3
+## SQLite Store
 
-Uses built-in `node:sqlite` (Node 22+). better-sqlite3 does not build on Node 24.
-Schema migrations are versioned in `src/store/migrations/`.
-Tables auto-created on first use via `store.upsert()`.
+Uses built-in `node:sqlite` (Node 22+). `better-sqlite3` does NOT build on Node 24.
+Tables: `todos`, `memory_entries`, `mentions`, `alerts`, `alert_profiles`, `mcp_connections`, `staged_actions`, `owner_activity`.
 
-## Sandbox Mode Isolation
+## ActivityBus (CLI Display)
 
-`src/sandbox/llm.client.ts` uses `@anthropic-ai/sdk` Messages API directly — no agent SDK, no tools, no pipeline bypass. Used by:
-1. `npm run dev:sandbox` — user-facing raw chat
-2. Phase K `PatternSynthesizer` — calls Claude to compress observations into patterns
+Global singleton, no-op until subscribed. `startCliRenderer()` subscribes in `startCli()`.
 
-Never import sandbox modules from the main pipeline.
+Event kinds: `ingress`, `shadow`, `runner_start`, `tool_call`, `completing`, `reply`.
 
-## Web Dashboard
+`runner_start` carries `displayName` (e.g. `kimi-k2p5 · fireworks`) — shown before spinner.
+`tool_call` events stream as they happen inside the Agent SDK loop.
+`completing` stops the spinner.
 
-Express on `127.0.0.1:3000` (default). `ROBIN_WEB_PORT` env or `settings.webPort` overrides.
-`createWebServer(store)` factory — does not start automatically, called by `initTodoLedger`.
-30-second polling on frontend. Source badges: Slack (deep-link), CLI, Web.
-Settings API allowlist: only `features`, `options`, `settings` keys — never `secrets`.
+## MCP from ~/.claude.json
 
-## Phase G Feature Pipeline Pattern
+`loadClaudeCodeMcpServers()` reads `~/.claude.json` at startup. Returns `NativeMcpServers` (stdio + http + streamable-http). Passed as `nativeMcpServers` to `AgentSdkRunnerClient`. Tokens never leave `~/.claude.json`.
 
-Each feature follows: `{name}.types.ts` → `{name}.service.ts` → `{name}.commands.ts`.
-Services are injected via `FeatureServices` interface in `command.router.ts`.
-Commands return `CommandResult { handled: boolean, reply?: string, commandType }`.
-Services never call the LLM — all LLM work goes through `AssistantService`.
-
-## Audit Service
-
-`auditService` singleton emits structured JSON to stderr.
-Wired into: event.router (access.denied), assistant.service (runner.telemetry), mode.commands (mode.changed), mcp.service (mcp.action), comms.service (comms.draft.generated).
-Redacts secrets in metadata before emit.
-Schema minimum: `event_type`, `actor_id`, `timestamp`, `correlation_id`, `outcome`.
+Only the Claude path uses MCP. `FireworksRunnerClient` receives no MCP servers.

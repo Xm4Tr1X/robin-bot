@@ -1,188 +1,115 @@
-# Robin Architecture (Human-Facing)
+# Robin — Architecture
 
 ## Purpose
 
-Robin is a single assistant core that can be reached through multiple channels (Slack, CLI, and future adapters like Telegram/WhatsApp).  
-All channels talk to the same assistant identity, shared todo state, and shared long-lived context, while preserving conversation-level context where needed.
+Robin is a single assistant core reachable through Slack, CLI, and a web dashboard simultaneously. All channels share one assistant identity, one durable SQLite store, and one todo ledger. Conversation-level context is partitioned by channel+thread.
 
-This document explains the architecture for humans: what components exist, how data flows, and what safety boundaries are enforced.
+---
 
 ## Product Principles
 
-- One assistant core, many ingestion channels.
-- OWNER-first access policy by default.
-- Draft-only autonomy for sensitive actions.
-- No self-mutation (Robin proposes upgrades, never applies them by itself).
-- Safety and security checks before and after every LLM interaction.
-- LLM/agent execution must run in a sandboxed container component (no direct host access).
-- SDK permission mode can be `bypassPermissions`; therefore Robin policy checks are mandatory and cannot be delegated to SDK prompts.
-- Passive observation (shadow mode) — Robin watches configured Slack channels silently, recording owner activity without replying.
-- Pattern learning — a nightly synthesis loop compresses shadow observations into owner preferences and behavioral patterns stored as global memory.
-- Risk-gated execution — task risk is classified (low/medium/high) before each LLM call; tool allowlists are selected per risk level.
+- One assistant core, many ingestion channels
+- OWNER-first access policy by default
+- Multi-model orchestration: fast open-source models for simple tasks, Claude for tools and MCP
+- Passive shadowing — Robin watches configured Slack channels silently; nightly pattern synthesis
+- Risk-gated execution — task risk classified (low/medium/high); tool allowlists selected per risk level
+- Safety gates fail closed — deny on error, never silent pass-through
+- No self-mutation — Robin cannot modify its own code or config
 
-## Operating Constraints (Current Direction)
+---
 
-- Primary deployment target: single-user local machine.
-- Retention policy: 30 days with auto-prune.
-- MVP integration boundary: Slack-first (external incident systems later).
-- Conversation policy: OWNER by default; other users only if explicitly enabled.
-
-## High-Level Architecture
+## Data flow
 
 ```mermaid
 flowchart TD
-  SlackIngress[SlackIngressAdapter] --> EventRouter[UnifiedEventRouter]
-  SlackIngress -->|shadow channel msg| ShadowPath[ShadowPath: ActivityService]
-  CliIngress[CliIngressAdapter] --> EventRouter
-  FutureIngress[FutureIngressAdapters] --> EventRouter
+  SlackIngress[SlackAdapter] --> EventRouter[EventRouter]
+  SlackIngress -->|shadow channel msg| ShadowPath[ActivityService]
+  CliIngress[CliAdapter] --> EventRouter
+  WebIngress[WebDashboard] --> EventRouter
 
   ShadowPath -->|nightly cron| PatternSynth[PatternSynthesizer]
   PatternSynth --> GlobalMem[GlobalMemory: preferences + patterns]
 
-  EventRouter --> AccessPolicy[ConversationAccessPolicy]
-  AccessPolicy --> CommandLayer[CommandAndIntentLayer]
+  EventRouter --> AccessPolicy[AccessPolicy]
+  AccessPolicy --> CommandRouter[CommandRouter]
+  CommandRouter -->|unmatched| AssistantService[AssistantService]
 
-  CommandLayer --> MemorySvc[MemoryService]
-  GlobalMem --> PromptOrchestrator
-  CommandLayer --> PromptOrchestrator[PromptOrchestrator]
-  PromptOrchestrator --> RiskClassifier[RiskClassifier: low/medium/high]
-  RiskClassifier --> SafetyPre[SafetyPrecheck]
-  SafetyPre --> LlmRuntime[SandboxedLlmRuntime]
-  LlmRuntime --> SafetyPost[SafetyPostcheck]
-  SafetyPost --> PersonaGuard[PersonaComplianceGuard]
+  GlobalMem --> AssistantService
+  AssistantService --> RiskClassifier[RiskClassifier: low/medium/high]
+  RiskClassifier --> ModelSelector[ModelSelector]
+  ModelSelector -->|fireworks| FireworksRunner[kimi2.5 / glm5]
+  ModelSelector -->|claude| AgentSDKRunner[Claude Haiku/Sonnet/Opus + MCP]
 
-  PersonaGuard -->|medium risk| StagingService[StagingService: approve/reject]
-  PersonaGuard -->|low risk| MemoryWriteback[MemoryWritebackPolicy]
-  MemoryWriteback --> StateStore[DurableStateStore]
-  StateStore --> ResponseFormatter[ChannelResponseFormatter]
+  AgentSDKRunner --> SafetyPost[SafetyPostcheck + PersonaGuard]
+  FireworksRunner --> SafetyPost
 
-  ResponseFormatter --> SlackOut[SlackAdapterOutput]
-  ResponseFormatter --> CliOut[CliAdapterOutput + ActivityBus]
+  SafetyPost -->|medium risk| StagingService[StagingService]
+  SafetyPost -->|low risk| Reply[Reply]
+
+  AgentSDKRunner --> ClaudeMCP[~/.claude.json MCP servers]
 ```
 
-## Separation of Concerns
+---
 
-### 1) Ingestion Layer
-- Owns transport-specific concerns only (Slack event decoding, CLI input handling, adapter auth handshake).
-- Must not call LLM directly.
-- Emits normalized assistant events conforming to canonical `IngressEvent` (defined in `IMPLEMENTATION_FOR_AGENTS.md`).
+## Component responsibilities
 
-### 2) Access Policy Layer
-- Enforces OWNER-first communication policy.
-- Handles allowlist checks for users/channels when non-owner access is enabled.
-- Emits explicit denied responses and audit events.
-- Runs immediately after event normalization and before command routing, memory retrieval, or LLM invocation.
+### Ingress Layer
+- Transport-specific decoding only (Slack event, CLI readline, HTTP)
+- Emits normalized `IngressEvent` — never calls LLM directly
+- Shadow path: owner channel messages in `shadowChannels` emit `source: 'slack_shadow'`, bypassing all routing, recorded to `ActivityService`
+- Thread context: on @mention in a thread, fetches `conversations.replies` (including bot messages) and attaches as `metadata.threadMessages`
+- Thread continuation: if `session.agentSessionId` exists for a thread, subsequent messages reach Robin without @mention
 
-### 3) Command and Intent Layer
-- Routes deterministic commands (`todo`, `policy`, `mcp`, `mode`) before LLM usage.
-- Classifies non-command input into assistant tasks.
+### Access Policy Layer
+- OWNER-first: owner and CLI/system sources always pass
+- Configurable at runtime via `policy set` commands
+- All denials emit structured `access.denied` audit events
 
-### 4) Memory Layer
-- Maintains:
-  - shared assistant memory (todos, preferences, decisions),
-  - conversation-local memory (thread/session context),
-  - audit events and lifecycle state.
-- Applies retention and compaction policies.
-- Memory writeback occurs only after post-LLM safety/persona checks pass.
+### Command Router
+- Regex-matched deterministic commands — no LLM call
+- Todo executor: LLM responses containing `add todo:` / `mark done:` etc. auto-executed on CLI source
+- Feature pipelines: todos, mentions, alerts, comms, MCP, staging, mode, policy
 
-### 5) Prompt Orchestration Layer
-- Builds prompt envelopes by combining:
-  - persona,
-  - retrieved memory,
-  - task context,
-  - policy constraints,
-  - allowed tools.
-- Encodes explicit response contracts.
-- Response contracts define format (`markdown`/`slack_mrkdwn`/`plain`), link policy, and output-size constraints.
+### Model Selector
+- Classifies text + thread context for routing signals
+- MCP/alert keywords → Claude Sonnet (open-source models cannot use MCP)
+- Tool keywords → Claude Haiku
+- Deep analysis without tools → glm5 (Fireworks)
+- Todo / well-defined → kimi2.5 (Fireworks)
+- User override: `use kimi:`, `use opus:`, etc. in prompt
 
-### 6) Safety and Persona Guard Layer
-- Pre-LLM checks:
-  - tool restrictions,
-  - sensitive data leakage prevention,
-  - action policy validation.
-- Post-LLM checks:
-  - redaction and sanitization,
-  - persona compliance,
-  - policy compliance before publishing.
-- Failure behavior is fail-closed:
-  - pre-LLM failure blocks runner call,
-  - post-LLM failure blocks publish and emits safe fallback response.
+### Assistant Service
+- Builds `PromptEnvelope`: persona + global patterns + conversation memory + thread context + todo context + risk-based tools
+- Safety precheck: blocks secrets in input, forbidden tools, oversized input
+- Emits `runner_start` to ActivityBus (spinner starts in CLI)
+- Runs LLM via `AgentSdkRunnerClient` or `FireworksRunnerClient`
+- Safety postcheck + persona guard before publishing
 
-### 7) LLM Runtime Layer
-- Runs in isolated containerized component.
-- Receives structured request payloads only.
-- Returns structured output + telemetry + tool trace.
-- No direct host-level write access.
-- Enforced isolation boundaries:
-  - controlled read-only mounts by default,
-  - restricted network egress allowlist,
-  - resource limits (CPU/memory/timeouts),
-  - no privileged container mode.
+### Memory Layer
+- Conversation-scoped: per thread, 30-day retention
+- Global-scoped: owner preferences and behavioral patterns from pattern synthesis
+- Global patterns injected as `[owner context]` into every prompt envelope
 
-Current-state note: until sandbox runner is fully enabled, execution may still happen in-process. In that period, policy layer enforcement is the primary safety boundary.
+### MCP Integration
+- `~/.claude.json` servers loaded at startup — tokens managed by Claude Code, never copied
+- Stdio and HTTP servers supported; only Claude path uses MCP (Fireworks has no MCP access)
+- Robin-managed registry (`mcp add/validate/test/enable`) for additional HTTP endpoints
 
-### 8) Output Layer
-- Formats output for each channel while preserving a common semantic response.
-- Publishes drafts only for high-risk operations unless explicit approval command exists.
+### Risk Gate
+- `low`: read-only tools only
+- `medium`: read-only tools; response staged for approval if `StagingService` active
+- `high`: empty tool list — LLM cannot execute any tool
 
-## Shared vs Local Context
+### ActivityBus (CLI display)
+- Global no-op event bus; no-op in Slack-only mode and tests
+- CLI renderer subscribes: spinner, tool call stream, ingress badges, model label
 
-- Shared across channels:
-  - todos and statuses,
-  - global OWNER preferences,
-  - decisions and known constraints.
-- Local to a conversation:
-  - thread-specific temporary context,
-  - intermediate reasoning references,
-  - short-lived disambiguation state.
+---
 
-This keeps cross-channel continuity without leaking irrelevant thread history everywhere.
-Channel-local context is partitioned by conversation/channel identity; shared state is limited to explicit shared entities (todos/preferences/approved decisions).
+## Security model
 
-## Security Model
-
-- Secrets never hardcoded in source/config docs.
-- Secrets injected at runtime via environment or secret providers.
-- `robin.json` env blocks must not carry secrets; use secret references and runtime env injection only.
-- Secret-like patterns redacted before persistence or outbound channel responses.
-- Audit trail for:
-  - policy denials,
-  - mode switches,
-  - MCP onboarding actions,
-  - sensitive draft generation events.
-Audit records require structured fields (`event_type`, `actor_id`, `timestamp`, `correlation_id`, `outcome`) and must not include raw secrets or full prompt bodies.
-
-## Channel Strategy
-
-- Slack and CLI are simultaneous communication channels to the same Robin core.
-- New channels (Telegram/WhatsApp) are added as adapters implementing the same ingress/output contracts.
-- Channel onboarding must not require architecture rewrites.
-
-## MCP Strategy
-
-- MCP integrations are owner-invoked and proposal-first.
-- Robin supports setup assistant commands (`mcp add/validate/test/enable`) with explicit approval gates.
-- MCP connections are disabled by default until validation passes.
-
-## Claude-Direct Mode
-
-- Robin supports:
-  - `orchestrated` mode (default),
-  - `claude-direct` mode (minimal mediation).
-- Even in `claude-direct`, the same pre-LLM and post-LLM safety gates remain mandatory.
-
-## Non-Goals
-
-- Autonomous self-editing/self-deployment.
-- Fully automated incident actions without approval.
-- Multi-tenant architecture in MVP.
-
-## Evolution Path
-
-Post-MVP extensions:
-- external incident systems,
-- richer retrieval (semantic index),
-- multi-user team mode with strict scoped access controls,
-- stronger observability and service deployment profiles.
-
-Architecture remains stable if adapters and policy boundaries are preserved.
+- Secrets never stored in source or config — env injection only
+- `~/.claude.json` tokens passed through to SDK at runtime; not persisted by Robin
+- Audit trail for: policy denials, mode changes, MCP actions, runner telemetry
+- Audit schema: `event_type`, `actor_id`, `timestamp`, `correlation_id`, `outcome`
+- Secrets and full prompt bodies never logged
