@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>robin — dashboard</title>
+  <style>
+    /* ── Design tokens (Blade-inspired) ───────────────────────────────── */
+    :root {
+      --color-bg:           #0f172a;
+      --color-surface:      #1e293b;
+      --color-surface-alt:  #263348;
+      --color-border:       #334155;
+      --color-accent:       #7c3aed;
+      --color-accent-light: #a78bfa;
+      --color-text:         #e2e8f0;
+      --color-text-muted:   #94a3b8;
+      --color-success:      #10b981;
+      --color-warning:      #f59e0b;
+      --color-error:        #ef4444;
+      --color-info:         #3b82f6;
+      --radius:             8px;
+      --radius-sm:          4px;
+      --font:               'Inter', system-ui, -apple-system, sans-serif;
+      --mono:               'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+    }
+
+    /* ── Reset ─────────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font);
+      background: var(--color-bg);
+      color: var(--color-text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    a { color: var(--color-accent-light); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    button { cursor: pointer; font-family: inherit; }
+
+    /* ── Header ────────────────────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 24px;
+      background: var(--color-surface);
+      border-bottom: 1px solid var(--color-border);
+      flex-shrink: 0;
+    }
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--color-accent);
+      box-shadow: 0 0 6px var(--color-accent);
+    }
+    .brand-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--color-text);
+      letter-spacing: 0.02em;
+    }
+    .brand-sep { color: var(--color-text-muted); margin: 0 4px; }
+    .brand-sub { font-size: 13px; color: var(--color-text-muted); }
+    .header-status {
+      font-size: 12px;
+      color: var(--color-success);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .status-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--color-success);
+    }
+
+    /* ── Main layout ───────────────────────────────────────────────────── */
+    main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      flex: 1;
+      overflow: hidden;
+    }
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; overflow: auto; }
+    }
+
+    /* ── Panels ────────────────────────────────────────────────────────── */
+    .panel {
+      padding: 20px;
+      overflow-y: auto;
+      border-right: 1px solid var(--color-border);
+    }
+    .panel:last-child { border-right: none; }
+    .panel-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--color-text-muted);
+      margin-bottom: 16px;
+    }
+
+    /* ── Tabs ──────────────────────────────────────────────────────────── */
+    .tabs {
+      display: flex;
+      gap: 2px;
+      margin-bottom: 16px;
+      background: var(--color-surface);
+      border-radius: var(--radius);
+      padding: 3px;
+    }
+    .tab {
+      flex: 1;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      border: none;
+      border-radius: calc(var(--radius) - 2px);
+      background: transparent;
+      color: var(--color-text-muted);
+      transition: all 0.15s;
+    }
+    .tab.active {
+      background: var(--color-surface-alt);
+      color: var(--color-text);
+    }
+    .tab:hover:not(.active) { color: var(--color-text); }
+
+    /* ── Add-todo form ─────────────────────────────────────────────────── */
+    .add-form {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 20px;
+      padding: 14px;
+      background: var(--color-surface);
+      border-radius: var(--radius);
+      border: 1px solid var(--color-border);
+    }
+    .add-form-row { display: flex; gap: 8px; }
+    .form-input, .form-select {
+      flex: 1;
+      padding: 7px 10px;
+      font-size: 13px;
+      background: var(--color-bg);
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      outline: none;
+      font-family: inherit;
+    }
+    .form-input:focus, .form-select:focus { border-color: var(--color-accent); }
+    .form-input::placeholder { color: var(--color-text-muted); }
+    .form-select option { background: var(--color-surface); }
+    .btn {
+      padding: 7px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: var(--color-accent);
+      color: #fff;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    .btn:hover { background: var(--color-accent-light); color: var(--color-bg); }
+    .btn-ghost {
+      background: var(--color-surface-alt);
+      color: var(--color-text-muted);
+    }
+    .btn-ghost:hover { color: var(--color-text); background: var(--color-border); }
+    .btn-sm {
+      padding: 4px 8px;
+      font-size: 11px;
+      border-radius: var(--radius-sm);
+    }
+    .btn-danger { background: var(--color-error); }
+    .btn-danger:hover { background: #dc2626; }
+
+    /* ── Todo card ─────────────────────────────────────────────────────── */
+    .todo-list { display: flex; flex-direction: column; gap: 8px; }
+    .todo-card {
+      padding: 12px 14px;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      transition: border-color 0.15s;
+    }
+    .todo-card:hover { border-color: var(--color-accent); }
+    .todo-card.status-done { opacity: 0.55; }
+    .todo-card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .todo-task {
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 1.4;
+      flex: 1;
+    }
+    .todo-id {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--color-text-muted);
+      flex-shrink: 0;
+    }
+    .todo-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 2px 7px;
+      font-size: 11px;
+      font-weight: 600;
+      border-radius: 999px;
+    }
+    .badge-priority-high   { background: rgba(239,68,68,0.15);  color: var(--color-error); }
+    .badge-priority-medium { background: rgba(245,158,11,0.15); color: var(--color-warning); }
+    .badge-priority-low    { background: rgba(16,185,129,0.15); color: var(--color-success); }
+    .badge-bucket-short { background: rgba(124,58,237,0.15); color: var(--color-accent-light); }
+    .badge-bucket-long  { background: rgba(59,130,246,0.15); color: var(--color-info); }
+    .badge-status {
+      background: rgba(148,163,184,0.12);
+      color: var(--color-text-muted);
+    }
+    .badge-status.in-progress { color: var(--color-warning); background: rgba(245,158,11,0.12); }
+    .badge-status.done        { color: var(--color-success); background: rgba(16,185,129,0.12); }
+    .badge-status.blocked     { color: var(--color-error);   background: rgba(239,68,68,0.12); }
+    .badge-source-slack {
+      background: rgba(124,58,237,0.12);
+      color: var(--color-accent-light);
+      text-decoration: none !important;
+    }
+    .badge-source-cli { background: rgba(148,163,184,0.12); color: var(--color-text-muted); }
+    .badge-source-web { background: rgba(59,130,246,0.12);  color: var(--color-info); }
+    .todo-actions { display: flex; gap: 5px; flex-wrap: wrap; }
+    .todo-eta { font-size: 11px; color: var(--color-text-muted); }
+
+    /* ── Empty state ───────────────────────────────────────────────────── */
+    .empty {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--color-text-muted);
+      font-size: 13px;
+    }
+
+    /* ── Settings panel ────────────────────────────────────────────────── */
+    #settings-panel { height: 100%; }
+    .settings-section {
+      margin-bottom: 24px;
+    }
+    .settings-section-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--color-text-muted);
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--color-border);
+    }
+    .setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+    }
+    .setting-row + .setting-row { border-top: 1px solid rgba(51,65,85,0.5); }
+    .setting-label {
+      font-size: 13px;
+      color: var(--color-text);
+    }
+    .setting-label small {
+      display: block;
+      font-size: 11px;
+      color: var(--color-text-muted);
+      margin-top: 2px;
+    }
+    .toggle {
+      position: relative;
+      width: 36px; height: 20px;
+      flex-shrink: 0;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: var(--color-border);
+      border-radius: 999px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      left: 3px; top: 3px;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      transition: 0.2s;
+    }
+    .toggle input:checked + .toggle-slider { background: var(--color-accent); }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(16px); }
+    .setting-input {
+      width: 200px;
+      padding: 6px 10px;
+      font-size: 12px;
+      background: var(--color-bg);
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      outline: none;
+      font-family: inherit;
+    }
+    .setting-input:focus { border-color: var(--color-accent); }
+    .setting-select {
+      width: 150px;
+      padding: 6px 10px;
+      font-size: 12px;
+      background: var(--color-bg);
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      outline: none;
+      font-family: inherit;
+    }
+    .settings-save-row {
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .save-msg {
+      font-size: 12px;
+      color: var(--color-success);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .save-msg.visible { opacity: 1; }
+
+    /* ── Toast ─────────────────────────────────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 10px 16px;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      font-size: 13px;
+      color: var(--color-text);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s;
+      z-index: 100;
+    }
+    #toast.show { opacity: 1; }
+    #toast.error { border-color: var(--color-error); color: var(--color-error); }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────── -->
+<header>
+  <div class="header-brand">
+    <div class="brand-dot"></div>
+    <span class="brand-name">robin</span>
+    <span class="brand-sep">•</span>
+    <span class="brand-sub">web dashboard</span>
+  </div>
+  <div class="header-status">
+    <div class="status-dot"></div>
+    online
+  </div>
+</header>
+
+<!-- ── Main ────────────────────────────────────────────────────────────── -->
+<main>
+
+  <!-- TODOS panel -->
+  <div class="panel" id="todos-panel">
+    <div class="panel-title">Todos</div>
+
+    <!-- Tab bar -->
+    <div class="tabs">
+      <button class="tab active" data-tab="active">Active</button>
+      <button class="tab" data-tab="done">Done</button>
+      <button class="tab" data-tab="all">All</button>
+    </div>
+
+    <!-- Add form -->
+    <form class="add-form" id="add-form">
+      <input class="form-input" id="new-task" type="text" placeholder="New todo…" autocomplete="off" />
+      <div class="add-form-row">
+        <select class="form-select" id="new-bucket">
+          <option value="short-term">Short-term</option>
+          <option value="long-term">Long-term</option>
+        </select>
+        <select class="form-select" id="new-priority">
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+          <option value="low">Low</option>
+        </select>
+        <button class="btn" type="submit">+ Add</button>
+      </div>
+    </form>
+
+    <!-- List -->
+    <div class="todo-list" id="todo-list">
+      <div class="empty">Loading todos…</div>
+    </div>
+  </div>
+
+  <!-- SETTINGS panel -->
+  <div class="panel" id="settings-panel">
+    <div class="panel-title">Settings</div>
+
+    <!-- Features section -->
+    <div class="settings-section">
+      <div class="settings-section-title">Features</div>
+
+      <div class="setting-row">
+        <div class="setting-label">Slack enabled</div>
+        <label class="toggle">
+          <input type="checkbox" id="feat-slack" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">Check-ins enabled</div>
+        <label class="toggle">
+          <input type="checkbox" id="feat-checkins" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">Owner approval required</div>
+        <label class="toggle">
+          <input type="checkbox" id="feat-approval" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">Redact before send</div>
+        <label class="toggle">
+          <input type="checkbox" id="feat-redact" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Settings section -->
+    <div class="settings-section">
+      <div class="settings-section-title">Settings</div>
+
+      <div class="setting-row">
+        <div class="setting-label">
+          Owner user ID
+          <small>Slack user ID (e.g. U01ABCDEF)</small>
+        </div>
+        <input class="setting-input" id="s-owner-id" type="text" />
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">
+          Check-in channel
+          <small>Channel ID or leave blank</small>
+        </div>
+        <input class="setting-input" id="s-checkin-ch" type="text" />
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">Web port</div>
+        <input class="setting-input" id="s-web-port" type="number" min="1024" max="65535" />
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">Max turns</div>
+        <input class="setting-input" id="s-max-turns" type="number" min="1" max="100" />
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">
+          Allowed tools
+          <small>Comma-separated tool names</small>
+        </div>
+        <input class="setting-input" id="s-allowed-tools" type="text" />
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">Default mode</div>
+        <select class="setting-select" id="s-default-mode">
+          <option value="observe">observe</option>
+          <option value="reply">reply</option>
+          <option value="draft">draft</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Save -->
+    <div class="settings-save-row">
+      <button class="btn" id="save-settings">Save Settings</button>
+      <span class="save-msg" id="save-msg">Saved! Restart to apply.</span>
+    </div>
+  </div>
+
+</main>
+
+<!-- ── Toast ────────────────────────────────────────────────────────────── -->
+<div id="toast"></div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────
+let todos = [];
+let activeTab = 'active'; // 'active' | 'done' | 'all'
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+function toast(msg, isError = false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show' + (isError ? ' error' : '');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => { el.className = ''; }, 2800);
+}
+
+function priorityClass(p)  { return 'badge badge-priority-' + p; }
+function bucketClass(b)    { return 'badge badge-bucket-' + (b === 'short-term' ? 'short' : 'long'); }
+function statusClass(s)    { return 'badge badge-status ' + s; }
+function bucketLabel(b)    { return b === 'short-term' ? 'short-term' : 'long-term'; }
+
+function sourceBadge(item) {
+  if (item.source === 'slack' && item.slackChannel && item.slackTs) {
+    const ts = item.slackTs.replace('.', '');
+    const href = `https://app.slack.com/archives/${item.slackChannel}/p${ts}`;
+    return `<a class="badge badge-source-slack" href="${href}" target="_blank" rel="noopener">&#9889; Slack</a>`;
+  }
+  if (item.source === 'cli')  return `<span class="badge badge-source-cli">&#8984; CLI</span>`;
+  if (item.source === 'web')  return `<span class="badge badge-source-web">&#127760; Web</span>`;
+  return '';
+}
+
+// ── Render todos ─────────────────────────────────────────────────────────
+function renderTodos() {
+  const list = document.getElementById('todo-list');
+
+  let filtered = todos;
+  if (activeTab === 'active') filtered = todos.filter(t => t.status !== 'done');
+  if (activeTab === 'done')   filtered = todos.filter(t => t.status === 'done');
+
+  if (filtered.length === 0) {
+    list.innerHTML = `<div class="empty">${activeTab === 'done' ? 'No completed todos yet.' : 'No active todos. Add one above!'}</div>`;
+    return;
+  }
+
+  list.innerHTML = filtered.map(item => `
+    <div class="todo-card status-${item.status}" data-id="${item.id}">
+      <div class="todo-card-header">
+        <div class="todo-task">${escHtml(item.task)}</div>
+        <span class="todo-id">${item.id}</span>
+      </div>
+      <div class="todo-meta">
+        <span class="${priorityClass(item.priority)}">${item.priority}</span>
+        <span class="${bucketClass(item.bucket)}">${bucketLabel(item.bucket)}</span>
+        <span class="${statusClass(item.status)}">${item.status}</span>
+        ${sourceBadge(item)}
+        ${item.eta ? `<span class="todo-eta">ETA: ${escHtml(item.eta)}</span>` : ''}
+      </div>
+      <div class="todo-actions">
+        ${item.status !== 'done'        ? `<button class="btn btn-ghost btn-sm" onclick="updateStatus('${item.id}','done')">&#10003; Done</button>` : ''}
+        ${item.status !== 'in-progress' ? `<button class="btn btn-ghost btn-sm" onclick="updateStatus('${item.id}','in-progress')">&#9654; In-progress</button>` : ''}
+        ${item.status !== 'blocked'     ? `<button class="btn btn-ghost btn-sm" onclick="updateStatus('${item.id}','blocked')">&#8855; Blocked</button>` : ''}
+        <button class="btn btn-ghost btn-sm btn-danger" onclick="removeTodo('${item.id}')">&#10005;</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ── API calls ─────────────────────────────────────────────────────────────
+async function loadTodos() {
+  try {
+    const res = await fetch('/api/todos');
+    if (!res.ok) throw new Error('Failed to load todos');
+    todos = await res.json();
+    renderTodos();
+  } catch (e) {
+    toast('Could not load todos', true);
+  }
+}
+
+async function addTodo(task, bucket, priority) {
+  const res = await fetch('/api/todos', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task, bucket, priority }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to add todo');
+  return data;
+}
+
+async function updateStatus(id, status) {
+  try {
+    const res = await fetch(`/api/todos/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+    await loadTodos();
+  } catch (e) {
+    toast(e.message || 'Update failed', true);
+  }
+}
+
+async function removeTodo(id) {
+  try {
+    const res = await fetch(`/api/todos/${id}`, { method: 'DELETE' });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+    await loadTodos();
+    toast('Todo removed');
+  } catch (e) {
+    toast(e.message || 'Remove failed', true);
+  }
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    activeTab = btn.dataset.tab;
+    renderTodos();
+  });
+});
+
+// ── Add form ──────────────────────────────────────────────────────────────
+document.getElementById('add-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const taskEl = document.getElementById('new-task');
+  const task = taskEl.value.trim();
+  if (!task) return;
+  const bucket   = document.getElementById('new-bucket').value;
+  const priority = document.getElementById('new-priority').value;
+  try {
+    await addTodo(task, bucket, priority);
+    taskEl.value = '';
+    await loadTodos();
+    toast('Todo added');
+  } catch (err) {
+    toast(err.message || 'Failed to add', true);
+  }
+});
+
+// ── Settings load ─────────────────────────────────────────────────────────
+async function loadSettings() {
+  try {
+    const res = await fetch('/api/settings');
+    const data = await res.json();
+    const f = data.features || {};
+    const s = data.settings || {};
+    const o = data.options  || {};
+
+    document.getElementById('feat-slack').checked    = !!f.slackEnabled;
+    document.getElementById('feat-checkins').checked = !!f.checkInsEnabled;
+    document.getElementById('feat-approval').checked = !!f.ownerApprovalRequired;
+    document.getElementById('feat-redact').checked   = !!f.redactionBeforeSend;
+
+    document.getElementById('s-owner-id').value      = s.ownerUserId   || '';
+    document.getElementById('s-checkin-ch').value    = s.checkinChannel || '';
+    document.getElementById('s-web-port').value      = s.webPort        ?? 3000;
+    document.getElementById('s-max-turns').value     = s.maxTurns       ?? 10;
+    document.getElementById('s-allowed-tools').value = (s.allowedTools || []).join(', ');
+
+    const modeEl = document.getElementById('s-default-mode');
+    if (o.defaultMode) modeEl.value = o.defaultMode;
+  } catch (e) {
+    toast('Could not load settings', true);
+  }
+}
+
+// ── Settings save ─────────────────────────────────────────────────────────
+document.getElementById('save-settings').addEventListener('click', async () => {
+  const toolsRaw = document.getElementById('s-allowed-tools').value;
+  const allowedTools = toolsRaw.split(',').map(t => t.trim()).filter(Boolean);
+
+  const payload = {
+    features: {
+      slackEnabled:           document.getElementById('feat-slack').checked,
+      checkInsEnabled:        document.getElementById('feat-checkins').checked,
+      ownerApprovalRequired:  document.getElementById('feat-approval').checked,
+      redactionBeforeSend:    document.getElementById('feat-redact').checked,
+    },
+    options: {
+      defaultMode: document.getElementById('s-default-mode').value,
+    },
+    settings: {
+      ownerUserId:    document.getElementById('s-owner-id').value.trim(),
+      checkinChannel: document.getElementById('s-checkin-ch').value.trim(),
+      webPort:        parseInt(document.getElementById('s-web-port').value, 10) || 3000,
+      maxTurns:       parseInt(document.getElementById('s-max-turns').value, 10) || 10,
+      allowedTools,
+    },
+  };
+
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error('Save failed');
+    const msg = document.getElementById('save-msg');
+    msg.classList.add('visible');
+    setTimeout(() => msg.classList.remove('visible'), 3000);
+  } catch (e) {
+    toast(e.message || 'Settings save failed', true);
+  }
+});
+
+// ── Polling (30s, skip while settings panel is focused) ───────────────────
+setInterval(async () => {
+  const focused = document.activeElement;
+  const inSettings = focused && focused.closest('#settings-panel');
+  if (!inSettings) await loadTodos();
+}, 30_000);
+
+// ── Init ──────────────────────────────────────────────────────────────────
+loadTodos();
+loadSettings();
+</script>
+</body>
+</html>

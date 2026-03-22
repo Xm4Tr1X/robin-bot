@@ -1,0 +1,65 @@
+display_information:
+  name: Robin
+  description: Personal Slack assistant for mentions, DMs, and check-ins
+  background_color: "#2F6FEB"
+
+features:
+  bot_user:
+    display_name: robin
+    always_online: false
+
+oauth_config:
+  scopes:
+    bot:
+      # Reads @mention events in channels (current behavior)
+      - app_mentions:read
+      # Allows bot to post replies/check-ins/messages (current behavior)
+      - chat:write
+
+      # Public channels metadata/listing (needed for broad channel routing/discovery)
+      - channels:read
+      # Public channel history/thread context (needed for mention extraction + alert triage)
+      - channels:history
+      # Private channels metadata/listing (enable only if Robin should operate there)
+      - groups:read
+      # Private channel history/thread context (enable only if needed)
+      - groups:history
+      # DM metadata/listing (needed for DM routing at scale)
+      - im:read
+      # DM history/thread context (needed for owner approvals and DM context ingestion)
+      - im:history
+      # Group DM metadata/listing (enable if team approval flows use MPIMs)
+      - mpim:read
+      # Group DM history/thread context (enable if Robin must read MPIM history)
+      - mpim:history
+
+      # Post in public channels without explicit app mention/invite (high-privilege; enable intentionally)
+      - chat:write.public
+
+      # Read emoji approvals (e.g. ✅/👍 reaction-based approval workflows)
+      - reactions:read
+
+      # Read file metadata/content references shared in conversations (optional)
+      - files:read
+
+settings:
+  event_subscriptions:
+    bot_events:
+      # Trigger when bot is @mentioned (current behavior)
+      - app_mention
+      # Trigger on DM messages to bot (current behavior)
+      - message.im
+      # Trigger on public channel messages (future ingestion / context)
+      - message.channels
+      # Trigger on private channel messages (future ingestion / context)
+      - message.groups
+      # Trigger on group DM messages (future ingestion / context)
+      - message.mpim
+      # Trigger when reactions are added (future reaction-based approvals)
+      - reaction_added
+  interactivity:
+    # Enable for future approval buttons/modals/actions (works with Socket Mode)
+    is_enabled: true
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false

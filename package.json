@@ -1,0 +1,45 @@
+{
+  "name": "robin-bot",
+  "version": "2.0.0",
+  "description": "OWNER's personal Slack assistant powered by Claude",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node --env-file=.env dist/index.js",
+    "dev": "nodemon --watch src --ext ts --delay 500ms --exec 'npm run build && node --env-file=.env dist/index.js'",
+    "dev:sandbox": "node --env-file=.env ./node_modules/.bin/ts-node --transpile-only src/sandbox/index.ts",
+    "sandbox": "node --env-file=.env dist/sandbox/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:sandbox": "vitest run tests/unit/sandbox",
+    "test:coverage": "vitest run --coverage",
+    "web": "open http://localhost:3000"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.0",
+    "@anthropic-ai/sdk": "^0.36.3",
+    "@anthropic-ai/vertex-sdk": "^0.14.4",
+    "@slack/bolt": "^3.19.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.19.15",
+    "@types/node-cron": "^3.0.11",
+    "@types/supertest": "^6.0.3",
+    "@vitest/coverage-v8": "^2.1.9",
+    "nodemon": "^3.1.14",
+    "supertest": "^7.2.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.9"
+  }
+}

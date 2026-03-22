@@ -1,0 +1,27 @@
+display_information:
+  name: Robin
+  description: Personal Slack assistant for mentions, DMs, and check-ins
+  background_color: "#2F6FEB"
+
+features:
+  bot_user:
+    display_name: robin
+    always_online: false
+
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - im:history
+      - chat:write
+
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.im
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false

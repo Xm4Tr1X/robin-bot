@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+snapshots/
+*.log
+data/
+.claude/settings.local.json
+robin.json
+personal-bot.md
+tmp/
