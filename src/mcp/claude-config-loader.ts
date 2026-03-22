@@ -91,6 +91,21 @@ export function loadClaudeCodeMcpServers(): NativeMcpServers {
       }
     }
 
+    // Synthesise an HTTP entry for coralogix-mcp when the stdio server is present.
+    // The Agent SDK reliably uses HTTP servers; stdio MCP servers are unreliable in the
+    // agent subprocess context. By emitting an HTTP version we give the LLM real
+    // Coralogix tool access without requiring any extra config.
+    const cxStdio = result['coralogix-mcp'];
+    if (cxStdio?.type === 'stdio' && cxStdio.env?.CORALOGIX_API_KEY) {
+      const apiKey = cxStdio.env.CORALOGIX_API_KEY;
+      const domain = cxStdio.env.CORALOGIX_DOMAIN ?? 'coralogix.com';
+      result['coralogix-http'] = {
+        type: 'http',
+        url: `https://api.${domain}/mgmt/api/v1/mcp`,
+        headers: { Authorization: `Bearer ${apiKey}` },
+      };
+    }
+
     return result;
   } catch {
     return {};
