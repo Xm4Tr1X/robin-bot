@@ -10,7 +10,6 @@ import { randomUUID } from 'node:crypto';
 import { App } from '@slack/bolt';
 import type { IngressAdapter, IngressEvent } from '../contracts';
 import { fetchThreadContext } from '../shadow/thread.fetcher';
-import { getSession } from '../session';
 
 // ---------------------------------------------------------------------------
 // Pure helper — exported for unit testing
@@ -145,35 +144,6 @@ export class SlackAdapter implements IngressAdapter {
           console.error('[SlackAdapter] onEvent error (shadow):', err);
         }
         return;
-      }
-
-      // Fix 2: thread continuation — if this is a channel thread reply and Robin
-      // has already been in this thread (agentSessionId exists), pass it through
-      // so the owner doesn't need to @mention Robin on every reply.
-      if (raw.channel_type !== 'im' && raw.thread_ts && !raw.bot_id) {
-        const threadConversationId = `${raw.channel}:${raw.thread_ts}`;
-        const idx = threadConversationId.indexOf(':');
-        const chId = threadConversationId.slice(0, idx);
-        const thId = threadConversationId.slice(idx + 1);
-        const session = getSession(chId, thId);
-        if (session.agentSessionId) {
-          const threadEvent: IngressEvent = {
-            id: randomUUID(),
-            source: 'slack',
-            actorId: raw.user ?? 'unknown',
-            channelId: raw.channel,
-            conversationId: threadConversationId,
-            threadId: raw.thread_ts,
-            text: raw.text ?? '',
-            ts: raw.ts,
-          };
-          try {
-            await onEvent(threadEvent);
-          } catch (err) {
-            console.error('[SlackAdapter] onEvent error (thread-continuation):', err);
-          }
-          return;
-        }
       }
 
       // Ignore anything that is not a direct message

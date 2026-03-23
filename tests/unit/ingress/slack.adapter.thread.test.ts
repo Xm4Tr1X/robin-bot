@@ -41,14 +41,8 @@ vi.mock('../../../src/shadow/thread.fetcher.js', () => ({
   fetchThreadContext: vi.fn(),
 }));
 
-// Mock session to control whether a thread session exists
-vi.mock('../../../src/session.js', () => ({
-  getSession: vi.fn(),
-}));
-
 import { SlackAdapter } from '../../../src/ingress/slack.adapter.js';
 import { fetchThreadContext } from '../../../src/shadow/thread.fetcher.js';
-import { getSession } from '../../../src/session.js';
 
 const TOKEN = 'xoxb-test';
 const APP_TOKEN = 'xapp-test';
@@ -59,7 +53,6 @@ describe('Fix 1: Thread context fetched on @mention in thread', () => {
     vi.clearAllMocks();
     for (const key of Object.keys(mockHandlers)) delete mockHandlers[key];
     vi.mocked(fetchThreadContext).mockResolvedValue([]);
-    vi.mocked(getSession).mockReturnValue({ mode: 'reply', assistantMode: 'orchestrated', threadId: '', channelId: '', memory: { constraints: [], decisions: [], pendingActions: [] } } as never);
   });
 
   it('calls fetchThreadContext when app_mention has thread_ts', async () => {
@@ -148,62 +141,21 @@ describe('Fix 1: Thread context fetched on @mention in thread', () => {
   });
 });
 
-describe('Fix 2: Thread continuation — no @mention needed after Robin has replied', () => {
+describe('Thread continuation removed — @mention required on every message', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     for (const key of Object.keys(mockHandlers)) delete mockHandlers[key];
     vi.mocked(fetchThreadContext).mockResolvedValue([]);
   });
 
-  it('passes channel thread message to Robin when session exists for that thread', async () => {
-    // Session exists → Robin was already in this thread
-    vi.mocked(getSession).mockReturnValue({
-      mode: 'reply',
-      assistantMode: 'orchestrated',
-      agentSessionId: 'existing-session',
-      threadId: '1700000000.000001',
-      channelId: 'C_GENERAL',
-      memory: { constraints: [], decisions: [], pendingActions: [] },
-    } as never);
-
+  it('channel thread message without @mention is ignored (prevents false triggers when others are tagged)', async () => {
     const adapter = new SlackAdapter({ token: TOKEN, appToken: APP_TOKEN, ownerUserId: OWNER });
     const received: IngressEvent[] = [];
     await adapter.start(async (ev) => { received.push(ev); });
 
     await mockHandlers['message']!({
       message: {
-        text: 'looks like a db issue actually',
-        user: OWNER,
-        channel: 'C_GENERAL',
-        channel_type: 'channel',
-        ts: '1700000003.000001',
-        thread_ts: '1700000000.000001',
-      },
-    });
-
-    expect(received).toHaveLength(1);
-    expect(received[0].source).toBe('slack');
-    expect(received[0].text).toBe('looks like a db issue actually');
-  });
-
-  it('ignores channel thread message when NO session exists (Robin not in thread)', async () => {
-    // No agentSessionId → Robin has never replied in this thread
-    vi.mocked(getSession).mockReturnValue({
-      mode: 'reply',
-      assistantMode: 'orchestrated',
-      agentSessionId: undefined,
-      threadId: '',
-      channelId: '',
-      memory: { constraints: [], decisions: [], pendingActions: [] },
-    } as never);
-
-    const adapter = new SlackAdapter({ token: TOKEN, appToken: APP_TOKEN, ownerUserId: OWNER });
-    const received: IngressEvent[] = [];
-    await adapter.start(async (ev) => { received.push(ev); });
-
-    await mockHandlers['message']!({
-      message: {
-        text: 'some random channel message',
+        text: 'looks like a db issue @someone-else',
         user: OWNER,
         channel: 'C_GENERAL',
         channel_type: 'channel',
@@ -215,12 +167,7 @@ describe('Fix 2: Thread continuation — no @mention needed after Robin has repl
     expect(received).toHaveLength(0);
   });
 
-  it('DMs still work normally regardless of session', async () => {
-    vi.mocked(getSession).mockReturnValue({
-      mode: 'reply', assistantMode: 'orchestrated', threadId: '', channelId: '',
-      memory: { constraints: [], decisions: [], pendingActions: [] },
-    } as never);
-
+  it('DMs still work without @mention', async () => {
     const adapter = new SlackAdapter({ token: TOKEN, appToken: APP_TOKEN, ownerUserId: OWNER });
     const received: IngressEvent[] = [];
     await adapter.start(async (ev) => { received.push(ev); });
