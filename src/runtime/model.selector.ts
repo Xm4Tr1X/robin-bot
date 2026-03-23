@@ -2,18 +2,20 @@
  * ModelSelector — decides which provider and model to use for a given request.
  *
  * Two providers:
- *   fireworks — open source models (kimi2.5, glm5) via OpenAI-compatible API
+ *   fireworks — open source models (kimi2.5) via OpenAI-compatible API
  *               no MCP tools — MCP requires the Claude Agent SDK
  *   claude    — Claude models via Agent SDK
  *               full MCP + Agent (subagent) tool support
  *
  * Routing logic:
- *   user override   — "use kimi", "use opus", "with glm", "sonnet:" etc. at prompt start
- *   kimi-k2p5       — well-defined executions: todo updates, clear short requests
- *   glm-5           — thoughtful analysis without tools: explanations, "why", summaries
- *   claude-haiku    — fast tasks needing read/search tools (no MCP)
+ *   user override   — "use kimi", "use opus", "use haiku", "sonnet:" etc. at prompt start
+ *   kimi-k2p5       — well-defined executions: todo updates, clear short requests, Q&A
+ *   claude-haiku    — analytical tasks and fast tasks needing read/search tools (no MCP)
  *   claude-sonnet   — anything needing MCP servers (coralogix, github, k8s, etc.)
  *   claude-opus     — deep reasoning, "think deeply", "think through"
+ *
+ * Note: glm5 was removed due to hallucination issues. Analytical tasks that
+ * previously went to glm5 now route to Claude Haiku for accuracy.
  *
  * MCP note: Fireworks models do not support MCP natively. Any task that needs
  * coralogix, github, spinnaker, or other MCP servers must use Claude Sonnet.
@@ -35,7 +37,6 @@ export interface ModelSelection {
 
 // Fireworks model IDs
 export const KIMI_MODEL    = 'accounts/fireworks/models/kimi-k2p5';
-export const GLM_MODEL     = 'accounts/fireworks/models/glm-5';
 
 // Claude model IDs
 export const CLAUDE_HAIKU  = 'claude-haiku-4-5-20251001';
@@ -49,10 +50,8 @@ export const CLAUDE_OPUS   = 'claude-opus-4-6';
 // These tasks need MCP servers — must use Claude Sonnet
 const MCP_SIGNALS = /\b(coralogix|github|spinnaker|gandalf|k8s|kubernetes|pod|namespace|devrev|alert|incident|outage|spike|p99|p95|error rate|latency|logs|traces|metrics|dashboard|sql|redash|investigate|deployment|rollout)\b/i;
 
-// These tasks need read/search tools but not MCP — can use Claude Haiku
+// These tasks need read/search tools or analytical thinking — Claude Haiku
 const TOOL_SIGNALS = /\b(search|find in|look at|read|grep|browse|web|look up|what does .* say)\b/i;
-
-// Deep analytical thinking without tools — GLM5
 const DEEP_SIGNALS = /\b(think through|explain why|root cause|analyze|reasoning|understand|walk me through|architecture|strategy|brainstorm|why (is|does|did|are|were)|how (does|do|should|would))\b/i;
 
 // Heavy reasoning — Opus
@@ -66,13 +65,12 @@ const TODO_SIGNALS = /\b(done|unblocked|finished|completed|mark|rename|change|up
 // ---------------------------------------------------------------------------
 
 const USER_OVERRIDES: Array<{ pattern: RegExp; resolve: (routing: RoutingConfig) => ModelSelection }> = [
-  { pattern: /\b(use kimi|with kimi|kimi:|kimi2\.?5)\b/i,     resolve: (r) => fireworks(r.actionModel ?? KIMI_MODEL, 'kimi-k2p5', true) },
-  { pattern: /\b(use glm|with glm|glm:|glm.?5)\b/i,            resolve: (r) => fireworks(r.reviewerModel ?? GLM_MODEL, 'glm-5', true) },
-  { pattern: /\b(use haiku|with haiku|haiku:)\b/i,             resolve: () => claude(CLAUDE_HAIKU, true) },
-  { pattern: /\b(use sonnet|with sonnet|sonnet:)\b/i,          resolve: (r) => claude(r.defaultModel ?? CLAUDE_SONNET, true) },
+  { pattern: /\b(use kimi|with kimi|kimi:|kimi2\.?5)\b/i,        resolve: (r) => fireworks(r.actionModel ?? KIMI_MODEL, 'kimi-k2p5', true) },
+  { pattern: /\b(use haiku|with haiku|haiku:)\b/i,               resolve: () => claude(CLAUDE_HAIKU, true) },
+  { pattern: /\b(use sonnet|with sonnet|sonnet:)\b/i,            resolve: (r) => claude(r.defaultModel ?? CLAUDE_SONNET, true) },
   { pattern: /\b(use opus|with opus|opus:|think deeply|use claude opus)\b/i, resolve: (r) => claude(r.reasoningModel ?? CLAUDE_OPUS, true) },
-  { pattern: /\b(use fireworks|fireworks:)\b/i,                resolve: (r) => fireworks(r.actionModel ?? KIMI_MODEL, 'kimi-k2p5', true) },
-  { pattern: /\b(use claude|claude:)\b/i,                      resolve: (r) => claude(r.defaultModel ?? CLAUDE_SONNET, true) },
+  { pattern: /\b(use fireworks|fireworks:)\b/i,                   resolve: (r) => fireworks(r.actionModel ?? KIMI_MODEL, 'kimi-k2p5', true) },
+  { pattern: /\b(use claude|claude:)\b/i,                         resolve: (r) => claude(r.defaultModel ?? CLAUDE_SONNET, true) },
 ];
 
 interface RoutingConfig {
@@ -80,7 +78,6 @@ interface RoutingConfig {
   defaultModel?: string;
   reasoningModel?: string;
   actionModel?: string;
-  reviewerModel?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,22 +113,20 @@ export function selectModel(
   // 3. MCP signals → always Claude Sonnet (checks thread context too)
   if (MCP_SIGNALS.test(fullSignal) || taskClass === 'alert') return claude(r.defaultModel ?? CLAUDE_SONNET);
 
-  // 4. Tool signals → Claude Haiku (read/search, no MCP)
-  if (TOOL_SIGNALS.test(fullSignal)) return claude(CLAUDE_HAIKU);
+  // 4. Tool or analytical signals → Claude Haiku
+  //    (glm5 removed for hallucination; analytical tasks now use Claude Haiku for accuracy)
+  if (TOOL_SIGNALS.test(fullSignal) || DEEP_SIGNALS.test(fullSignal)) return claude(CLAUDE_HAIKU);
 
   // 5. High-risk → Claude
   if (riskLevel === 'high') return claude(r.defaultModel ?? CLAUDE_SONNET);
 
-  // 6. Deep thinking without tools → GLM5
-  if (DEEP_SIGNALS.test(fullSignal)) return fireworks(r.reviewerModel ?? GLM_MODEL, 'glm-5');
-
-  // 7. Todo / well-defined operations → Kimi2.5
+  // 6. Todo / well-defined operations → Kimi2.5
   if (taskClass === 'todo' || TODO_SIGNALS.test(text)) return fireworks(r.actionModel ?? KIMI_MODEL, 'kimi-k2p5');
 
-  // 8. Low-risk general → Kimi2.5
+  // 7. Low-risk general → Kimi2.5
   if (riskLevel === 'low') return fireworks(r.actionModel ?? KIMI_MODEL, 'kimi-k2p5');
 
-  // 9. Default → Claude Sonnet
+  // 8. Default → Claude Sonnet
   return claude(r.defaultModel ?? CLAUDE_SONNET);
 }
 

@@ -10,7 +10,7 @@ const routing = {
   defaultModel: 'claude-sonnet-4-6',
   reasoningModel: 'claude-opus-4-6',
   actionModel: 'accounts/fireworks/models/kimi-k2p5',
-  reviewerModel: 'accounts/fireworks/models/glm-5',
+  // reviewerModel removed — glm5 dropped for hallucination
 };
 
 const cases: Array<{ label: string; taskClass: Parameters<typeof selectModel>[0]; risk: Parameters<typeof selectModel>[1]; text: string }> = [

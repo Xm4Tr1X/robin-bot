@@ -4,7 +4,7 @@
  * Tests all layers:
  *   1. Routing table     — pure logic, no API calls
  *   2. Permission gates  — access policy, safety precheck, risk classification
- *   3. Fireworks live    — real API calls to kimi2.5 and glm5
+ *   3. Fireworks live    — real API calls to kimi2.5
  *   4. Claude live       — real API calls via Anthropic Messages API
  *   5. MCP registry      — verifies ~/.claude.json servers are loadable
  *
@@ -19,7 +19,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { AnthropicVertex } from '@anthropic-ai/vertex-sdk';
-import { selectModel, KIMI_MODEL, GLM_MODEL } from '../src/runtime/model.selector';
+import { selectModel, KIMI_MODEL } from '../src/runtime/model.selector';
 import { checkAccess } from '../src/policy/access.policy';
 import { safetyPrecheck } from '../src/policy/safety.precheck';
 import { classifyRisk } from '../src/policy/risk.classifier';
@@ -48,7 +48,7 @@ const routing = {
   defaultModel:   'claude-sonnet-4-6',
   reasoningModel: 'claude-opus-4-6',
   actionModel:    KIMI_MODEL,
-  reviewerModel:  GLM_MODEL,
+  // reviewerModel removed — glm5 dropped
 };
 
 const args = process.argv.slice(2);
@@ -78,10 +78,9 @@ function testRouting(): boolean {
     { label: 'todo rename',                  taskClass: 'todo',    risk: 'low',    text: 'rename task X to Y',                   expectProvider: 'fireworks', expectModel: 'kimi' },
     { label: 'quick factual Q&A',            taskClass: 'general', risk: 'low',    text: 'what is 2+2',                          expectProvider: 'fireworks', expectModel: 'kimi' },
     { label: 'summarize week',               taskClass: 'general', risk: 'low',    text: 'summarize what happened last week',     expectProvider: 'fireworks', expectModel: 'kimi' },
-    // Fireworks — glm5
-    { label: 'explain why (analytical)',     taskClass: 'general', risk: 'low',    text: 'explain why microservices are hard',    expectProvider: 'fireworks', expectModel: 'glm' },
-    { label: 'think through arch',           taskClass: 'general', risk: 'medium', text: 'think through the architecture for X',  expectProvider: 'fireworks', expectModel: 'glm' },
-    // Claude — haiku
+    // Claude — haiku (analytical + tools; glm5 removed for hallucination)
+    { label: 'explain why (analytical)',     taskClass: 'general', risk: 'low',    text: 'explain why microservices are hard',    expectProvider: 'claude',    expectModel: 'haiku' },
+    { label: 'think through arch',           taskClass: 'general', risk: 'medium', text: 'think through the architecture for X',  expectProvider: 'claude',    expectModel: 'haiku' },
     { label: 'search tools needed',          taskClass: 'general', risk: 'low',    text: 'search for the config file',           expectProvider: 'claude',    expectModel: 'haiku' },
     // Claude — sonnet (MCP required)
     { label: 'coralogix logs',               taskClass: 'alert',   risk: 'medium', text: 'check coralogix logs for errors',      expectProvider: 'claude',    expectModel: 'sonnet' },
@@ -92,7 +91,7 @@ function testRouting(): boolean {
     { label: 'think deeply',                 taskClass: 'general', risk: 'medium', text: 'think deeply about scaling strategy',  expectProvider: 'claude',    expectModel: 'opus' },
     // User overrides
     { label: 'override: use kimi on alert',  taskClass: 'alert',   risk: 'high',   text: 'use kimi: quick summary',              expectProvider: 'fireworks', expectModel: 'kimi' },
-    { label: 'override: use glm',            taskClass: 'general', risk: 'low',    text: 'use glm: explain why db is slow',      expectProvider: 'fireworks', expectModel: 'glm' },
+    // glm override removed — no longer a supported model
     { label: 'override: use opus',           taskClass: 'todo',    risk: 'low',    text: 'use opus to think through this',       expectProvider: 'claude',    expectModel: 'opus' },
     { label: 'override: with haiku',         taskClass: 'alert',   risk: 'high',   text: 'with haiku list the open alerts',      expectProvider: 'claude',    expectModel: 'haiku' },
   ];
@@ -363,20 +362,7 @@ async function testFireworks(): Promise<boolean> {
       validate: (t: string) => /mercury|mars|venus|earth/i.test(t),
       expectHint: 'should mention Mercury, Venus, Earth, Mars',
     },
-    {
-      label: 'glm5 — analytical response',
-      model: GLM_MODEL,
-      prompt: 'Why does microservices architecture increase operational complexity? Be concise.',
-      validate: (t: string) => t.length > 30,
-      expectHint: 'should give a substantive answer',
-    },
-    {
-      label: 'glm5 — thoughtful explanation',
-      model: GLM_MODEL,
-      prompt: 'In one sentence: what is the trade-off between consistency and availability in distributed systems?',
-      validate: (t: string) => t.length > 30,
-      expectHint: 'should give a real answer',
-    },
+    // glm5 removed — hallucination issues
   ];
 
   let passed = 0; let failed = 0;
